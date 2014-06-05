@@ -1,4 +1,8 @@
-cd C:\Users\Chris Rozemuller\Dropbox\PhD\EclipseWorkspace\BW4T2\BW4T2\BW4TServer
+:: start the BW4T server on port 8001
+:: When using different ports one can use multiple servers at the same time (specify the correct port in in the mas2g file)
+:: settings may change per PC
+
+cd %~dp0
 set Repast=C:\RepastSimphony-2.0-beta
 set RepastPlugins=%Repast%\eclipse\plugins\
 set RepastRuntime=%RepastPlugins%\repast.simphony.runtime_2.0.0

@@ -57,7 +57,7 @@ init module {
 	
 	goals{
 		endOfSequence.			% every block has been delivered
-		%sendLogs.				% analyis has been informed
+		sendLogs.				% analyis has been informed
 	}
 	
 
@@ -121,7 +121,8 @@ main module [exit=nogoals]{
 		% drop blocks				
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID)) then{
 			% drop the block if its color is not needed.
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then putDown + delete(block(BlockID, ColorID, RoomID)).			
+			% Before dropping also check if an agent is in the dropzone with that color, because sometimes percepts travel faster than communication of delivery
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)), not((in(Agent,'DropZone'),holding(Agent,_,ColorID)))) then putDown + delete(block(BlockID, ColorID, RoomID)) + print(TDL).			
 			% drop the block if in the dropzone and the color is needed and get out.
 			if bel(at('DropZone'), nextColorInSeq(ColorID)) then putDown + delete(block(BlockID, ColorID, RoomID)) + adopt(at('FrontDropZone')).		
 		}
@@ -258,6 +259,8 @@ event module {
 		
 		%Remove elements that are currently held by an agent from remainingSequence.
 		%The first element that matches ColorID and the corresponding SequenceID is removed.
+		
+		%is cut needed???
 		forall bel(holding(Agent,BlockID,ColorID),not(me(Agent))) do {
 			if bel(remainingSequence(CList,NList), nth0(Indx,CList,ColorID,NewCList),!,nth0(Indx,NList,_,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
 		}
@@ -267,7 +270,7 @@ event module {
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 		
 		%if not holding or having a goal to hold a block then select a block to deliver
-		if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_))) then nextBlockSelection.
+		if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_))) then nextBlockSelection.
 		
 		%when holding a block then go to the dropzone, via frontdropzone
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID),me(Me)) then {
@@ -290,7 +293,7 @@ event module {
 		forall goal(in(NVal,Me,SomePlace)), bel(endOfSequence) do drop(in(NVal,Me,SomePlace)).
 		forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)), bel(endOfSequence) do drop(holding(NVal,Agent,BlockID,ColorID,SeqID)).
 		%send signal to the analyist that the agent is finished.			
-		%forall bel(endOfSequence) do bAnalyst.send(finished) + insert(sendLogs).
+		forall bel(endOfSequence) do bAnalyst.send(finished) + insert(sendLogs).
 	}		
 }
 

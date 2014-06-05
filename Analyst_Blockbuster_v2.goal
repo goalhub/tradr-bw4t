@@ -1,0 +1,75 @@
+%still needs a clean-up
+init module {
+	knowledge {
+		currentTime(H, M, S):- get_time(T), stamp_date_time(T, date(_, _, _, H, M, S, _, _, _), 'local').
+		
+		relativeTime(S):- startTime(H1, M1, S1), currentTime(H2, M2, S2), S is ((H2*60*60+M2*60+S2)-(H1*60*60+M1*60+S1)).
+		
+		
+	}
+	beliefs {
+
+		
+		timeoutTime(50).
+		overtime(0).
+		
+		failedMessageCount(block,0).
+		failedMessageCount(delivered,0).
+		failedMessageCount(visited,0).
+		goodMessageCount(block,0).
+		goodMessageCount(delivered,0).
+		goodMessageCount(visited,0).	
+			
+	}
+	% Agent needs to hold a goal to use BatchRunner.
+	goals{
+		makelogs.
+	}
+	program {
+		% This is absolute time measuring the state time. 
+		if bel( currentTime(H, M, S) ) then insert( startTime(H, M, S) ).
+		% initiate random communication fails. 
+		
+		
+    }
+}
+main module [exit=nogoals]{
+program{}
+}
+
+
+event module {
+	program {
+				
+		%set random fail parameters for agents		
+		if bel(not(comFailBlock(_)), random(R)) then insert(comFailBlock(R)) + allother.sendonce(:comFailBlock(R)).
+		if bel(not(comFailDelivered(_)), random(R)) then insert(comFailDelivered(R)) + allother.sendonce(:comFailDelivered(R)).
+		if bel(not(comFailVisited(_)), random(R)) then insert(comFailVisited(R)) + allother.sendonce(:comFailVisited(R)).
+		
+		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PROCESS INCOMING MESSAGES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		% Message about the environmental condition. We need to log it so that we can distinghish data.
+		
+		
+
+		forall bel( received(Sender, failMessage(block)), relativeTime(S), failedMessageCount(block,I), Next is I+1) do delete(failedMessageCount(block,I)) + insert(failedMessageCount(block, Next) ).
+		forall bel( received(Sender, failMessage(delivered)), relativeTime(S), failedMessageCount(delivered,I), Next is I+1) do delete(failedMessageCount(delivered,I)) + insert(failedMessageCount(delivered, Next) ).
+		forall bel( received(Sender, failMessage(visited)), relativeTime(S), failedMessageCount(visited,I), Next is I+1) do delete(failedMessageCount(visited,I)) + insert(failedMessageCount(visited, Next) ).
+		
+		forall bel( received(Sender, goodMessage(block)), relativeTime(S), goodMessageCount(block,I), Next is I+1) do delete(goodMessageCount(block,I)) + insert(goodMessageCount(block, Next) ).
+		forall bel( received(Sender, goodMessage(delivered)), relativeTime(S), goodMessageCount(delivered,I), Next is I+1) do delete(goodMessageCount(delivered,I)) + insert(goodMessageCount(delivered, Next) ).
+		forall bel( received(Sender, goodMessage(visited)), relativeTime(S), goodMessageCount(visited,I), Next is I+1) do delete(goodMessageCount(visited,I)) + insert(goodMessageCount(visited, Next) ).
+			
+		
+		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+		% WRITE LOGS TO A FILE WHEN THE TASK IS FINISHED.	
+		if bel(relativeTime(S),timeoutTime(T), S > T) then delete(overtime(0)) + insert(overtime(1)).
+		
+		if bel( received(Sender, finished);overtime(1)), goal(makelogs) then {
+			if bel( relativeTime(S) ) then insert( timeToComplete(S) ).
+			if true then log(bb) + insert( makelogs ).
+		}
+	
+		% CLEAN UP MAIL BOX
+		forall bel( received(Sender, Msg) ) do delete( received(Sender, Msg) ).
+	}
+}
