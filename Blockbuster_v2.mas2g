@@ -9,7 +9,7 @@ agentfiles{
 	%"Agent_Blockbuster_msgloss.goal" [name = bBot] .
 	"Agent_Blockbuster_v2.goal" [name = bBot] .
 	% Analyst file used for launching agent that analyses (counts) message reports from other agents.
-	%"blockbuster_analyst.goal" [name = bAnalyst].
+	%"blockbuster_v2_analyst.goal" [name = bAnalyst].
 	%"humanbot.goal" [name = robot].
 
 }
