@@ -6,7 +6,7 @@ init module {
 		room(PlaceID) :- zone(_,PlaceID,_,_,Neighbours), length(Neighbours,1).
 		
 		%The color that should be delivered next
-		nextColorInSeq(ColorID) :- sequenceIndex(Integer),sequence(List), nth0(Integer, List, ColorID).
+		%nextColorInSeq(ColorID) :- remainingSequence([ColorID|_],_).
 		
 		%Short reference to own block
 		holding(BlockID,ColorID) :- me(Me), holding(Me, BlockID,ColorID).
@@ -20,15 +20,15 @@ init module {
 		atBlock(BlockID) :- holding(BlockID,_).
 		
 		% definition of a finished sequence: the sequence index is equal to the lenght of the sequence
-		endOfSequence :- sequenceIndex(Integer),sequence(List), length(List,Integer).				  		
+		%endOfSequence :- sequenceIndex(Integer),sequence(List), length(List,Integer).				  		
 				
 		% list of indices of the sequence list that are higher than the current sequence index
-		numberList(Nlist) :- sequence(List), length(List,LastInteger),sequenceIndex(FirstInteger), Last is LastInteger - 1, numlist(FirstInteger, Last, Nlist).
+		%numberList(Nlist) :- sequence(List), length(List,LastInteger),sequenceIndex(FirstInteger), Last is LastInteger - 1, numlist(FirstInteger, Last, Nlist).
 		% colors at these indices
 		%colorList(Clist) :-  numberList(Nlist), sequence(List), findall(C, (member(I,Nlist),nth0(I,List,C)),Clist).
-		colorList(Clist) :-  numberList(Nlist), colorList(Clist,Nlist) .
-		colorList([ColorID|Clist],[H|T]) :-  sequence(List), nth0(H,List,ColorID), colorList(Clist,T).				
-		colorList([],[]).		
+		%colorList(Clist) :-  numberList(Nlist), colorList(Clist,Nlist) .
+		%colorList([ColorID|Clist],[H|T]) :-  sequence(List), nth0(H,List,ColorID), colorList(Clist,T).				
+		%colorList([],[]).		
 
 
 %% ---- Calculating distances------------------------------------------------------
@@ -53,15 +53,13 @@ init module {
 		remainingSequence([],[]). 
 		roomGoalList([]).
 		blockGoalList([]).
+		sequence([]).
+		nextColorInSequence([]).
 	}	
-	
 	goals{
-		endOfSequence.			% every block has been delivered
-		sendLogs.				% analyis has been informed
+		sentLogs.
 	}
-	
-
-			
+				
 	program {
 		% Store map information, i.e., navigation points in agent's belief base.
 		forall bel(percept(zone(ID, Name, X, Y, Neighbours))) do insert(zone(ID, Name, X, Y, Neighbours)).
@@ -70,10 +68,10 @@ init module {
 		forall bel(percept(state(State))) do insert(state(State)).
 
 		% adopt the goal sequence as a goal
-		forall bel(percept(sequence(T))) do insert(sequence(T)).
-		
+		%forall bel(percept(sequence(T))) do insert(sequence(T)).
+		forall bel(percept(sequence(T))) do adopt(sequence(T)).
 		% insert sequence index
-		forall bel(percept(sequenceIndex(N))) do insert(sequenceIndex(N)).	
+		%forall bel(percept(sequenceIndex(N))) do insert(sequenceIndex(N)).	
 			
 		% insert current location
 		forall bel(percept(at(X))) do insert(at(X)).
@@ -122,9 +120,10 @@ main module [exit=nogoals]{
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID)) then{
 			% drop the block if its color is not needed.
 			% Before dropping also check if an agent is in the dropzone with that color, because sometimes percepts travel faster than communication of delivery
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)), not((in(Agent,'DropZone'),holding(Agent,_,ColorID)))) then putDown + delete(block(BlockID, ColorID, RoomID)) + print(TDL).			
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then putDown + delete(block(BlockID, ColorID, RoomID)) + print(TDL).			
 			% drop the block if in the dropzone and the color is needed and get out.
-			if bel(at('DropZone'), nextColorInSeq(ColorID)) then putDown + delete(block(BlockID, ColorID, RoomID)) + adopt(at('FrontDropZone')).		
+			if bel(at('DropZone'), nextColorInSequence(ColorID),sequence(S),append(S,[ColorID],NewS)) then putDown + delete(block(BlockID, ColorID, RoomID)) + 
+				delete(sequence(S)) + insert(sequence(NewS)) + allother.send(delivered(ColorID)) + adopt(at('FrontDropZone')).		
 		}
 		
 		if a-goal(holding(Nval,Me,BlockID,ColorID,SeqID)), bel(me(Me),atBlock(BlockID),block(BlockID, ColorID, RoomID)) then pickUp + allother.send(not(block(BlockID, ColorID, RoomID))).
@@ -165,7 +164,7 @@ event module {
 		forall bel(percept(not(holding(BlockID))), me(Me),holding(Me,BlockID, ColorID)) do delete(holding(Me, BlockID,ColorID)) + allother.send(:not(holding(BlockID,ColorID))).	
 					
 		% Keep track of current sequenceIndex.		
-		forall bel(sequenceIndex(Integer), percept(sequenceIndex(NewInteger)))	do delete(sequenceIndex(Integer)) + insert(sequenceIndex(NewInteger)).
+		%forall bel(sequenceIndex(Integer), percept(sequenceIndex(NewInteger)))	do delete(sequenceIndex(Integer)) + insert(sequenceIndex(NewInteger)).
 		
 		% Keep track of occupied rooms
 		%forall bel(percept(occupied(RoomID)))	do insert(occupied(RoomID)).
@@ -203,13 +202,19 @@ event module {
 		forall bel(received(Sender, holding(BlockID,ColorID)), not(holding(Sender,BlockID,ColorID))) do insert(holding(Sender,BlockID,ColorID)).
 		forall bel(received(Sender, not(holding(BlockID,ColorID))), holding(Sender,BlockID,ColorID)) do delete(holding(Sender,BlockID,ColorID)).
 		
-		%in and visited rooms
-		
+		%in and visited rooms		
 		forall bel(received(Sender, in(RoomID)), not(in(Sender,RoomID))) do {
 			if true then insert(in(Sender,RoomID)).
 			if bel(not(visited(RoomID))) then insert(visited(RoomID)). %make a memory
-		}
+		}		
 		forall bel(received(Sender, not(in(RoomID))), in(Sender,RoomID)) do delete(in(Sender,RoomID)).
+
+		%learn about deliveries		
+		forall bel(received(Sender, delivered(ColorID))) do {
+			if bel(sequence(S),append(S,[ColorID],NewS)) then delete(sequence(S)) + insert(sequence(NewS)). %update sequence
+			if bel(holding(Sender,BlockID,ColorID)) then delete(holding(Sender,BlockID,ColorID)).			%delete holding
+		}
+
 								
 %		Goals		
 		%holding blocks
@@ -222,6 +227,34 @@ event module {
 		
 		forall bel(received(Sender, Message)) do delete(received(Sender, Message)).		
 
+
+%		//////////////////////////////////////////
+%		List what work needs to be done
+%		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+		% remainingSequence(ColorList,NumberList) contains two lists with the elements of the sequence that should be gathered
+		% ColorList are the ColorIDs that should be gathered; NumberList are the corresponding SequenceIDs, so double colors can be distinguished   		
+		%if bel(remainingSequence(C,N), colorList(Clist),numberList(Nlist)) then delete(remainingSequence(C,N)) + insert(remainingSequence(Clist,Nlist)).
+		if goal(sequence(S)), bel(sequence(DoneList), append(DoneList,Clist,S), 
+		length(S,Last),length(Clist,Nlength), Start is Last-Nlength, End is Last-1, numlist(Start, End, Nlist),remainingSequence(C,N)) 
+		then delete(remainingSequence(C,N)) + insert(remainingSequence(Clist,Nlist)).
+		
+		if bel(remainingSequence([NextC|_],_), nextColorInSequence(C)) then delete(nextColorInSequence(C)) + insert(nextColorInSequence(NextC)).
+		
+		%Remove elements that are currently a goal to be delivered from remainingSequence.
+		%The first element that matches SeqID and the corresponding Color is removed.
+		forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)), bel(not(me(Agent))) do {
+			if bel(remainingSequence(CList,NList), nth0(Indx,NList,SeqID,NewNList),nth0(Indx,CList,_,NewCList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
+		}
+		
+		%Remove elements that are currently held by an agent from remainingSequence.
+		%The first element that matches ColorID and the corresponding SequenceID is removed.
+		
+		%is cut needed???
+		forall bel(holding(Agent,BlockID,ColorID),not(me(Agent))) do {
+			if bel(remainingSequence(CList,NList), nth0(Indx,CList,ColorID,NewCList),!,nth0(Indx,NList,_,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
+		}
+		
 %		//////////////////////////////////////////
 %		check goals for duplication of effort
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -240,30 +273,8 @@ event module {
 		}
 		
 		% don't go to dropzone if you don't hold the next required block
-		forall goal(at('DropZone')), bel(holding(Me, BlockID,ColorID),  not(nextColorInSeq(ColorID)), state(State), me(Me)) do drop(at('DropZone')) + delete(state(State)) + insert(state(arrived)).
+		forall goal(at('DropZone')), bel(holding(Me, BlockID,ColorID),  not(nextColorInSequence(ColorID)), state(State), me(Me)) do drop(at('DropZone')) + adopt(at('FrontDropZone'))+ delete(state(State)) + insert(state(arrived)).
 
-
-%		//////////////////////////////////////////
-%		List what work needs to be done
-%		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-
-		% remainingSequence(ColorList,NumberList) contains two lists with the elements of the sequence that should be gathered
-		% ColorList are the ColorIDs that should be gathered; NumberList are the corresponding SequenceIDs, so double colors can be distinguished   		
-		if bel(remainingSequence(C,N), colorList(Clist),numberList(Nlist)) then delete(remainingSequence(C,N)) + insert(remainingSequence(Clist,Nlist)).
-		
-		%Remove elements that are currently a goal to be delivered from remainingSequence.
-		%The first element that matches SeqID and the corresponding Color is removed.
-		forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)), bel(not(me(Agent))) do {
-			if bel(remainingSequence(CList,NList), nth0(Indx,NList,SeqID,NewNList),nth0(Indx,CList,_,NewCList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
-		}
-		
-		%Remove elements that are currently held by an agent from remainingSequence.
-		%The first element that matches ColorID and the corresponding SequenceID is removed.
-		
-		%is cut needed???
-		forall bel(holding(Agent,BlockID,ColorID),not(me(Agent))) do {
-			if bel(remainingSequence(CList,NList), nth0(Indx,CList,ColorID,NewCList),!,nth0(Indx,NList,_,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
-		}
 		
 %		//////////////////////////////////////////
 %		set new goals
@@ -277,7 +288,7 @@ event module {
 			%always go to frontdropzone with a block
 			if not(goal(at('FrontDropZone'))), bel(at(PlaceID), PlaceID \= 'FrontDropZone', PlaceID \= 'DropZone') then adopt(at('FrontDropZone')).
 			%go to dropzone if holding the next required color
-			if bel(at('FrontDropZone'), nextColorInSeq(ColorID)) then adopt(at('DropZone')).	
+			if bel(at('FrontDropZone'),nextColorInSequence(ColorID)) then adopt(at('DropZone')).	
 		}	
 		
 		%if not holding a block, or going to a place then select a place to go
@@ -287,13 +298,19 @@ event module {
 %		End of Life management
 %  		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 		%not part of functional program, but required to get statistics and do quick batchruns.	
+
+					
+		forall not(goal(sequence(S))) do {
+			%send signal to the analyist that the agent is finished.	
+			if true then bAnalyst.send(finished) + insert(sentLogs).
+			
+			%stop going to places
+			forall goal(at(SomePlace)) do drop(at(SomePlace)).
+			forall goal(in(NVal,Me,SomePlace)) do drop(in(NVal,Me,SomePlace)).
+			forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)) do drop(holding(NVal,Agent,BlockID,ColorID,SeqID)).
+		}
 		
-		%stop going to places
-		forall goal(at(SomePlace)), bel(endOfSequence) do drop(at(SomePlace)).
-		forall goal(in(NVal,Me,SomePlace)), bel(endOfSequence) do drop(in(NVal,Me,SomePlace)).
-		forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)), bel(endOfSequence) do drop(holding(NVal,Agent,BlockID,ColorID,SeqID)).
-		%send signal to the analyist that the agent is finished.			
-		forall bel(endOfSequence) do bAnalyst.send(finished) + insert(sendLogs).
+		
 	}		
 }
 
