@@ -51,14 +51,16 @@ event module {
 		
 		
 
-		forall bel( received(Sender, failMessage(block)), relativeTime(S), failedMessageCount(block,I), Next is I+1) do delete(failedMessageCount(block,I)) + insert(failedMessageCount(block, Next) ).
-		forall bel( received(Sender, failMessage(delivered)), relativeTime(S), failedMessageCount(delivered,I), Next is I+1) do delete(failedMessageCount(delivered,I)) + insert(failedMessageCount(delivered, Next) ).
-		forall bel( received(Sender, failMessage(visited)), relativeTime(S), failedMessageCount(visited,I), Next is I+1) do delete(failedMessageCount(visited,I)) + insert(failedMessageCount(visited, Next) ).
+		forall bel( received(Sender, failMessage(block)), failedMessageCount(block,I), Next is I+1) do delete(failedMessageCount(block,I)) + insert(failedMessageCount(block, Next) ).
+		forall bel( received(Sender, failMessage(delivered)), failedMessageCount(delivered,I), Next is I+1) do delete(failedMessageCount(delivered,I)) + insert(failedMessageCount(delivered, Next) ).
+		forall bel( received(Sender, failMessage(visited)), failedMessageCount(visited,I), Next is I+1) do delete(failedMessageCount(visited,I)) + insert(failedMessageCount(visited, Next) ).
 		
-		forall bel( received(Sender, goodMessage(block)), relativeTime(S), goodMessageCount(block,I), Next is I+1) do delete(goodMessageCount(block,I)) + insert(goodMessageCount(block, Next) ).
-		forall bel( received(Sender, goodMessage(delivered)), relativeTime(S), goodMessageCount(delivered,I), Next is I+1) do delete(goodMessageCount(delivered,I)) + insert(goodMessageCount(delivered, Next) ).
-		forall bel( received(Sender, goodMessage(visited)), relativeTime(S), goodMessageCount(visited,I), Next is I+1) do delete(goodMessageCount(visited,I)) + insert(goodMessageCount(visited, Next) ).
+		forall bel( received(Sender, goodMessage(block)), goodMessageCount(block,I), Next is I+1) do delete(goodMessageCount(block,I)) + insert(goodMessageCount(block, Next) ).
+		forall bel( received(Sender, goodMessage(delivered)), goodMessageCount(delivered,I), Next is I+1) do delete(goodMessageCount(delivered,I)) + insert(goodMessageCount(delivered, Next) ).
+		forall bel( received(Sender, goodMessage(visited)), goodMessageCount(visited,I), Next is I+1) do delete(goodMessageCount(visited,I)) + insert(goodMessageCount(visited, Next) ).
 			
+		
+		forall bel( received(Sender, toolong)) do insert(toolong).
 		
 		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		% WRITE LOGS TO A FILE WHEN THE TASK IS FINISHED.	
