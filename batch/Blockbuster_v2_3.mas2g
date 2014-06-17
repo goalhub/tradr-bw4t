@@ -1,0 +1,24 @@
+environment{
+	env = "../BW4T2/BW4TClient.jar" .
+	% insert proper initialization parameters and values on the next line, or remove it.
+	init = [map = "big12", clientip ="localhost", clientport="2000", serverip = "localhost", serverport = "8000", agentcount = "3", humancount = "0", launchgui = "false", goal = "true", Speed = "0.5"] .
+}
+
+agentfiles{
+% insert (list of) agent file references below.
+	%"Agent_Blockbuster_msgloss.goal" [name = bBot] .
+	"../Agent_Blockbuster_v2.goal" [name = bBot] .
+	% Analyst file used for launching agent that analyses (counts) message reports from other agents.
+	"../Analyst_Blockbuster_v2.goal" [name = bAnalyst].
+	%"humanbot.goal" [name = robot].
+
+}
+
+launchpolicy{
+	% insert appropriate launch rules for your environment and agents below.
+	%when [type=human, max=1]@env do launch * : robot .
+	when entity@env do launch bBot : bBot .
+	launch bAnalyst : bAnalyst.
+	
+	
+}

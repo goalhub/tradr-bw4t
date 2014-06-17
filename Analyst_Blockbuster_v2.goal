@@ -28,6 +28,9 @@ init module {
 	program {
 		% This is absolute time measuring the state time. 
 		if bel( currentTime(H, M, S) ) then insert( startTime(H, M, S) ).
+		
+		%forall bel(percept(sequence(T))) do insert(sequence(T)).
+		
 		% initiate random communication fails. 
 		
 		
@@ -59,7 +62,7 @@ event module {
 		forall bel( received(Sender, goodMessage(delivered)), goodMessageCount(delivered,I), Next is I+1) do delete(goodMessageCount(delivered,I)) + insert(goodMessageCount(delivered, Next) ).
 		forall bel( received(Sender, goodMessage(visited)), goodMessageCount(visited,I), Next is I+1) do delete(goodMessageCount(visited,I)) + insert(goodMessageCount(visited, Next) ).
 			
-		
+		forall bel( received(Sender, sequence(T)),not(sequence(T)), length(T,L)) do insert(sequence(T)) + insert(seqLength(L)).
 		forall bel( received(Sender, toolong)) do insert(toolong).
 		
 		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

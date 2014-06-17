@@ -27,24 +27,29 @@ init module {
 		findPath(Start,Finish, 0) :- memberchk(Finish,Start),!.
 		findPath(Start,Finish, Distance) :- extendsearch(Start,[],NeighbourList),sort(NeighbourList,SortedNeighbourList), findPath(SortedNeighbourList, Finish, D),Distance is D+1.
 		
-		
+		%use database instead
+		%findPath([Start],Finish, Distance) :- path(Start,Finish,Distance).
+				
 		%alternative faster but less accurate option with eucledian distance:
 		%findPath([Start|_],Finish,Distance) :- zone(_,Start,RX,RY,_), zone(_,Finish,MX,MY,_), Distance is sqrt((RX-MX)^2 + (RY-MY)^2).		
 				
 		% broadening the search with all neighbours of the Roomlist
         extendsearch([Room|Roomlist],OldNeigbourList,CompleteNeighbourList):- zone(_,Room,_,_,Neigbours),append(Neigbours,OldNeigbourList,NewNeighbourList),extendsearch(Roomlist,NewNeighbourList,CompleteNeighbourList).
 		extendsearch([],CompleteNeighbourList,CompleteNeighbourList).
-			
+		
+		
+		
+		
 	}
 	
 	beliefs{
+		%#import "path_big24.pl" %using a database with precalculated path length is much faster in SWI-prolog, but very slow in GOAL.
 		remainingSequence([],[]). 
 		roomGoalList([]).
 		blockGoalList([]).
 		sequence([]).
 		nextColorInSequence([]).
-		roomtimer([],0).
-		%otherTaskDist(0).
+		
 	}	
 	goals{
 		sentLogs.
@@ -57,15 +62,14 @@ init module {
 		% Record current state of movement in belief base.
 		forall bel(percept(state(State))) do insert(state(State)).
 
-		% adopt the goal sequence as a goal
-		forall bel(percept(sequence(T))) do adopt(sequence(T)).
+		% adopt the goal sequence as a goal and tell it to the analyst
+		forall bel(percept(sequence(T))) do adopt(sequence(T)) + bAnalyst.send(sequence(T)).
 			
 		% insert current location
 		forall bel(percept(at(X))) do insert(at(X)).
 		
-		%reduce search time by precalculating distances
-		%forall bel((zone(_,A,_,_,_),zone(_,B,_,_,_),findPath([A],B,D))) do insert(path([A,B],D)).
-
+		%go to a close random room first (only to prevent huge communication load at start), this is only faster when there are many agents				
+		%if bel(room(RoomID), RoomID \= 'DropZone', findPath(['FrontDropZone'],RoomID,D),D<7,random(R),NVal is D+R,me(Me)) then adopt(in(NVal,Me,RoomID)) + allother.send(!in(NVal,RoomID)).
 		
 	}
 	actionspec {	
@@ -109,17 +113,17 @@ main module [exit=nogoals]{
 			% drop the block if its color is not needed.
 			% Before dropping also check if an agent is in the dropzone with that color, because sometimes percepts travel faster than communication of delivery
 			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)),me(Me)) then putDown + delete(block(BlockID, ColorID, RoomID)) + print([Me, 'dropped a block']). %log(bb)+log(gb)+log(pb)+log(mb).			
-			% drop the block if in the dropzone and the color is needed and get out.
-			if bel(at('DropZone'), nextColorInSequence(ColorID),sequence(S),append(S,[ColorID],NewS)) then putDown + delete(block(BlockID, ColorID, RoomID)) + 
-				delete(sequence(S)) + insert(sequence(NewS)) + allother.send(delivered(ColorID)) + adopt(at('FrontDropZone')).		
+			
+			% drop the block in the dropzone if the color is needed and get out.
+			% Also add the color to the sequence and tell other agents about the delivery
+			if bel(at('DropZone'), nextColorInSequence(ColorID),sequence(S),append(S,[ColorID],NewS),state(State)) then putDown + delete(block(BlockID, ColorID, RoomID)) + 
+				delete(sequence(S)) + insert(sequence(NewS)) + allother.send(delivered(ColorID)) + adopt(at('FrontDropZone')) + delete(state(State)) + insert(state(arrived)).		
 		}
-		
+		  		
 		if a-goal(holding(Nval,Me,BlockID,ColorID,SeqID)), bel(me(Me),atBlock(BlockID),block(BlockID, ColorID, RoomID)) then pickUp + allother.send(not(block(BlockID, ColorID, RoomID))).
 		if a-goal(atBlock(BlockID)) then goToBlock(BlockID).		
-		if a-goal(at(PlaceID)) then goTo(PlaceID).  
-		if a-goal(in(Nval,Me,RoomID)), bel(me(Me)) then goTo(RoomID).
-
-		
+		if a-goal(at(PlaceID)) then goTo(PlaceID).
+		if a-goal(in(Nval,Me,RoomID)), bel(me(Me)) then goTo(RoomID).		
 			
 	}
 }
@@ -259,13 +263,21 @@ event module {
 			forall bel(at('DropZone')) do adopt(at('FrontDropZone'))+ delete(state(State)) + insert(state(arrived)).		%sometimes the line above isn't fast enough, so the bot needs to go out of the dropzone
 		}
 		
+		%for block priority strategy: drop exploration tasks when holding a block.
+		%forall goal(in(NVal,Me,RoomID)), bel(me(Me),holding(Me, BlockID,ColorID)) do drop(in(NVal,Me,RoomID)) + allother.send(!not(in(NVal,RoomID))).
 		
 %		//////////////////////////////////////////
 %		set new goals
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 		
-		%if not holding or having a goal to hold a block then select a block to deliver
-		if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_);in(_,Me,_))) then nextBlockSelection.			
+		%quickest strategy: no other task is initiated untill the current task is finished.
+		%NOTE: the effectiveness of a strategy is very dependent on computational performance. e.g. if negotiations take too long on a slow pc then the result is not effective anymore		
+		
+		%current task priority: if not delivering a block or exploring then select a block to deliver
+		if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_);in(_,Me,_))) then nextBlockSelection.
+		
+		%block delivery priority: if not delivering a block then select a block to deliver (also when exploring)
+		%if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_))) then nextBlockSelection.  		
 		
 		%when holding a block then go to the dropzone, via frontdropzone
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID),me(Me)) then {
@@ -277,18 +289,7 @@ event module {
 		
 		%if not holding a block, or going to a place then select a place to go
 		if bel(me(Me),not(holding(_,_))), not(goal(at(_); atBlock(_); in(_,Me,_))) then nextRoomSelection.							
-
 		
-%		/////////////////////////////////////////////////
-%		debugging
-%  		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-
-		%detect agents getting stuck in a room
-		if bel(me(Me), in(Me,RoomID),roomtimer(TRoomID,I)) then {
-			if bel(TRoomID == RoomID, Next is I+1) then delete(roomtimer(TRoomID,I)) + insert(roomtimer(RoomID,Next)).
-			if bel(TRoomID \= RoomID) then delete(roomtimer(TRoomID,I)) + insert(roomtimer(RoomID,0)).
-			if bel(I > 100, not(toolong)) then print([Me, 'I am stuck']) + insert(toolong) + bAnalyst.send(toolong).
-		}
 		
 %		/////////////////////////////////////////////////
 %		End of Life management
@@ -348,16 +349,13 @@ module nextBlockSelection{
 		listall L <- goal(holding(_,_,BlockID,_,_)) do {
 			if bel(blockGoalList(BL)) then delete(blockGoalList(BL)) + insert(blockGoalList(L)).							
 		}
-		
-		%bid, even if having another task first
-		%if bel(otherTaskDist(X)) then delete(otherTaskDist(X)) + insert(otherTaskDist(0)).
-		%if goal(in(_,Me,RoomID)), bel(at(MyLoc), findPath([MyLoc],RoomID,Dist)) then delete(otherTaskDist(0)) + insert(otherTaskDist(Dist)).
  		
 		%select the closest available block of the required color and set a goal to get to and hold the block
-		if bel(me(Me), blockGoalList(BlockGoalList), remainingSequence([ColorID|_],[SeqID|_]), 																	%get the required block color and unavailable blocks
+		if bel(me(Me), blockGoalList(BlockGoalList), remainingSequence([ColorID|_],[SeqID|_]),state(State),																%get the required block color and unavailable blocks
 			findall([D,SomeBlockID], (block(SomeBlockID,ColorID, SomeRoomID),not(memberchk(SomeBlockID, BlockGoalList)), deliveryDistance(SomeRoomID,D)),L),			%find all available blocks and their distance 
 			sort(L,BlockList), [[Dist,OptiBlockID]|_] = BlockList,	block(OptiBlockID, ColorID, RoomID), random(R), NVal is Dist + R) 							%sort blocks for the closest distance, this distance (+ random) is the negotiation value
-			then adopt(at(RoomID),atBlock(OptiBlockID), holding(NVal, Me,OptiBlockID,ColorID,SeqID)) + allother.send(!holding(NVal, OptiBlockID,ColorID,SeqID)).	%adopt and communicate goal to get the closest block
+			then adopt(at(RoomID),atBlock(OptiBlockID), holding(NVal, Me,OptiBlockID,ColorID,SeqID)) + allother.send(!holding(NVal, OptiBlockID,ColorID,SeqID))	%adopt and communicate goal to get the closest block
+			+ delete(state(State)) + insert(state(arrived)).
 	}
 }
 	
