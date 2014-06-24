@@ -10,7 +10,7 @@ init module {
 	beliefs {
 
 		
-		timeoutTime(50).
+		timeoutTime(230).
 		overtime(0).
 		
 		failedMessageCount(block,0).
@@ -64,11 +64,13 @@ event module {
 			
 		forall bel( received(Sender, sequence(T)),not(sequence(T)), length(T,L)) do insert(sequence(T)) + insert(seqLength(L)).
 		forall bel( received(Sender, toolong)) do insert(toolong).
+		forall bel( received(Sender, dropped)) do insert(dropped).
 		
 		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		% WRITE LOGS TO A FILE WHEN THE TASK IS FINISHED.	
 		if bel(relativeTime(S),timeoutTime(T), S > T) then delete(overtime(0)) + insert(overtime(1)).
 		
+				
 		if bel( received(Sender, finished);overtime(1)), goal(makelogs) then {
 			if bel( relativeTime(S) ) then insert( timeToComplete(S) ).
 			if true then log(bb) + insert( makelogs ).
