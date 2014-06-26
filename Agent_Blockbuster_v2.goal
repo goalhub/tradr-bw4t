@@ -20,44 +20,50 @@ init module {
 %% ---- Calculating distances------------------------------------------------------
 		% Distance is the number of adjecent zones that have to be crossed to get to the location		
 		  
+		findOptiRoom(RL,Dist,OptiRoom) :- at(MyLoc), findall((D,RoomID) , (room(RoomID),not(visited(RoomID)),not(memberchk(RoomID,RL)),RoomID\='DropZone',findPath([MyLoc],RoomID,D)) , L),	%find all available rooms and their distance
+			sort(L,RoomList), [(Dist,OptiRoom)|_] = RoomList.		  
+		
+		findOptiBlock(ColorID, BL, Dist, OptiBlock) :- 	findall((D,SomeBlockID), (block(SomeBlockID,ColorID, SomeRoomID),not(memberchk(SomeBlockID, BL)), deliveryDistance(SomeRoomID,D)),L),			%find all available blocks and their distance 
+			sort(L,BlockList), [(Dist,OptiBlockID)|_] = BlockList.
+		
 		% distance to a room, and back to the frontdropzone.
 		deliveryDistance(RoomID,Dist) :- at(MyLoc), findPath([MyLoc],RoomID,Dist1),findPath([RoomID],'FrontDropZone',Dist2),Dist is Dist1+Dist2.	
 				
 		%findPath(+Start,+Finish,-Distance) recursively broadens the search, and ends when the finish node is part of the list.
 		findPath(Start,Finish, 0) :- memberchk(Finish,Start),!.
 		findPath(Start,Finish, Distance) :- extendsearch(Start,[],NeighbourList),sort(NeighbourList,SortedNeighbourList), findPath(SortedNeighbourList, Finish, D),Distance is D+1.
-		
-		%use database instead
-		%findPath([Start],Finish, Distance) :- path(Start,Finish,Distance).
 				
-		%alternative faster but less accurate option with eucledian distance:
-		%findPath([Start|_],Finish,Distance) :- zone(_,Start,RX,RY,_), zone(_,Finish,MX,MY,_), Distance is sqrt((RX-MX)^2 + (RY-MY)^2).		
-				
-		% broadening the search with all neighbours of the Roomlist
+		% broadening the search with all neighbours in the Roomlist
         extendsearch([Room|Roomlist],OldNeigbourList,CompleteNeighbourList):- zone(_,Room,_,_,Neigbours),append(Neigbours,OldNeigbourList,NewNeighbourList),extendsearch(Roomlist,NewNeighbourList,CompleteNeighbourList).
 		extendsearch([],CompleteNeighbourList,CompleteNeighbourList).
 		
 %% ----Speed improvements------------------------------------------------------------
+		%quickly remove a list of specific elements from two lists:
 		
-		%remove numbered elements from NList, and remove the corresponding element from CList 
+		%remove SeqIDs from NList, and remove the corresponding color element from CList 
 		reducelistn(CList,NList,[],CList,NList).
 		reducelistn(CList,NList,[[_,SeqID]|T],NewCList,NewNList) :-	nth0(Indx,NList,SeqID,UNList),nth0(Indx,CList,_,UCList), reducelistn(UCList,UNList,T,NewCList,NewNList).	
 		
-		%remove colored elements from CList, and remove the corresponding index from NList
+		%remove ColorIDs from CList, and remove the corresponding index from NList
 		reducelistc(CList,NList,[],CList,NList).
-		reducelistc(CList,NList,[[_,ColorID]|T],NewCList,NewNList) :-	nth0(Indx,CList,ColorID,UCList),!,nth0(Indx,NList,_,UNList), reducelistc(UCList,UNList,T,NewCList,NewNList).				
+		reducelistc(CList,NList,[[_,ColorID]|T],NewCList,NewNList) :-	nth0(Indx,CList,ColorID,UCList),!,nth0(Indx,NList,_,UNList), reducelistc(UCList,UNList,T,NewCList,NewNList).		
+							
 	}
 	
 	beliefs{
-		%#import "path_big24.pl" %using a database with precalculated path length is much faster in SWI-prolog, but very slow in GOAL.
-		remainingSequence([],[]). 
-		roomGoalList([]).
-		blockGoalList([]).
+		%remainingSequence(CList,NList). List of the required colors in the sequence that are not being delivered by others yet. 
+		%CList is a list of required colors and NList is the corresponding list of their places in the sequence. 		
+		remainingSequence([],[]).
+		
+		%list of colors that have been delivered:
 		sequence([]).
+		
+		%The next color that is required in the dropzone
 		nextColorInSequence([]).
 		
 	}	
-	goals{
+	goals{		
+		%goal to notify analyst about being finished
 		sentLogs.
 	}
 				
@@ -73,37 +79,37 @@ init module {
 			
 		% insert current location
 		forall bel(percept(at(X))) do insert(at(X)).
-		
-		%go to a close random room first (only to prevent huge communication load at start), this is only faster when there are many agents				
-		%if bel(room(RoomID), RoomID \= 'DropZone', findPath(['FrontDropZone'],RoomID,D),D<7,random(R),NVal is D+R,me(Me)) then adopt(in(NVal,Me,RoomID)) + allother.send(!in(NVal,RoomID)).
-		
+
 	}
 	actionspec {	
 		% Actions are only executed if the precondition of that action holds.
+		% NOTE: Agents reason quicker than the environment, so I use postconditions instead of percepts to handle changes in state() or holding()
+		% the corresponing percepts are still used, but only to (dis)confirm these beliefs 
 		
 		% The goTo action makes the agent move to a place (location) in the BW4T environment.
 		% As long as the agent has not arrived at the place it is going to, it will be in "traveling" mode.
 		goTo(Location) {
-            pre {zone(_,Location,_,_,_),not(state(traveling))} %
-			post { state(traveling) }
+            pre {zone(_,Location,_,_,_), state(S), S \= traveling} %
+			post { not(state(S)), state(traveling) }
 		}
 		
-		% the robot must be in the samre room as the block is located and it must not be already traveling.
+		%The robot must be in the same room as the block and it must not be traveling. Postcondition: the robot is in traveling state
 		goToBlock(BlockID) {
-            pre { block(BlockID,_,RoomID),at(RoomID), not(state(traveling))}
-			post { state(traveling) }
+            pre { block(BlockID,_,RoomID),at(RoomID), state(S), S \= traveling}
+			post {  not(state(S)), state(traveling) }
 		}		
 		
-		% pickup can only be performed when a block is near. Postconditions are handled by the percepts from the environment.
+		% pickup can only be performed when the required block is near and not holding anything. Postcondition: true.
+		% NOTE: pickup can fail so no postcondition holding!
 		pickUp{
-			pre{ atBlock(_), not(holding(_,_))}
+			pre{ atBlock(BlockID), not(holding(_,_)),not(state(traveling)), block(BlockID, ColorID, _),me(Me)}
 			post{ true }
 		}
 		
-		% putDown can only be performed when a block is held. Postconditions are handled by the percepts from the environment.
+		% putDown can only be performed when a block is held. Postconditions: the robot doesn't hold the block, the block is removed from the beliefbase.
 		putDown{
-			pre{ holding(_,_) }
-			post{ true }
+			pre{ me(Me), holding(Me, BlockID,ColorID), block(BlockID, ColorID, RoomID)}
+			post{ not(block(BlockID, ColorID, RoomID)), not(holding(Me, BlockID,ColorID)) }
 		}
 	}		
 }
@@ -111,23 +117,30 @@ init module {
 
 main module [exit=nogoals]{
 	program{		
-
-		% perform actions to achief goals
 		
 		% drop blocks				
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID)) then{
-			% drop the block if its color is not needed. (why can this happen?)			
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)),me(Me),in(Me,RoomID)) then putDown + delete(block(BlockID, ColorID, RoomID)) + print([Me, 'dropped a block']) + bAnalyst.send(dropped).% + log(bb)+log(gb)+log(pb)+log(mb).			
+			% drop the block if its color is not needed (function to improve resilience, should not happen during normal use, this could indicate that the agent is cycling too slow).			
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)),me(Me),in(Me,RoomID)) then putDown + log(bb)+log(gb)+log(mb)+log(pb)+ allother.send(:not(holding(BlockID,ColorID))) + print([Me, 'dropped a block']) + bAnalyst.send(dropped).		
+			
 			% drop the block in the dropzone if the color is needed and get out.
 			% Also add the color to the sequence and tell other agents about the delivery
-			if bel(at('DropZone'), nextColorInSequence(ColorID),sequence(S),append(S,[ColorID],NewS),state(State)) then putDown + delete(block(BlockID, ColorID, RoomID)) + 
-				delete(sequence(S)) + insert(sequence(NewS)) + allother.send(delivered(ColorID)) + adopt(at('FrontDropZone')) + delete(state(State)) + insert(state(arrived)).		
+			% added not(state(traveling)) to prevent drops on edge of dropzone; edge drops are not detected by environment
+			if bel(at('DropZone'), not(state(traveling)), nextColorInSequence(ColorID),sequence(S),append(S,[ColorID],NewS)) then putDown  + 
+				delete(sequence(S)) + insert(sequence(NewS)) + allother.send(delivered(ColorID)) + adopt(at('FrontDropZone')).		
 		}
-		  		
-		if a-goal(holding(Nval,Me,BlockID,ColorID,SeqID)), bel(me(Me),atBlock(BlockID),block(BlockID, ColorID, RoomID)) then pickUp + allother.send(not(block(BlockID, ColorID, RoomID))).
-		if a-goal(atBlock(BlockID)), bel(state(State)) then goToBlock(BlockID) + delete(state(State)).		
-		if a-goal(at(PlaceID)), bel(state(State)) then goTo(PlaceID) + delete(state(State)).
-		if bel(me(Me),state(State)), goal(in(Nval,Me,RoomID)) then goTo(RoomID) + delete(state(State)).	
+		
+		%pick up blocks that are a goal and notify others.   		
+		if a-goal(holding(Nval,Me,BlockID,ColorID,SeqID)), bel(me(Me),atBlock(BlockID),block(BlockID, ColorID,RoomID)) then pickUp.
+		
+		%go to blocks that are a goal.
+		if a-goal(atBlock(BlockID)) then goToBlock(BlockID).
+		
+		%go to places that are a goal
+		%at(PlaceID) is used for location goals that don't have to be shared with others.
+		if a-goal(at(PlaceID)) then goTo(PlaceID).			
+		%in(NVal,Agent,RoomID) is used for location goals that are shared with others, so others can anticipate and negotiate. 	
+		if bel(me(Me)), goal(in(_,Me,RoomID)) then goTo(RoomID).
 	}
 }
 
@@ -136,20 +149,20 @@ event module {
 	program{
 				
 %		////////////////////////////////////
-%		belief percepts from the environment
+%		believe percepts from the environment
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 		
-		%keep track of the agent's state
+		%keep track of the agent's state (also handled by action postconditions)
 		forall bel(percept(state(NewState)),state(State)) do delete(state(State)) + insert(state(NewState)). 		
 		
-		% Keep track of current room.
+		%Keep track of current room, and inform others.
 		forall bel(percept(in(RoomID)),me(Me))	do insert(in(Me,RoomID)) + allother.send(:in(RoomID)).
 		forall bel(percept(not(in(RoomID))),me(Me)) do delete(in(Me,RoomID)) + allother.send(:not(in(RoomID))).
 
-		% Keep track of current place.
+		%Keep track of current location.
 		forall bel(at(Placeid), percept(at(NewPlaceid))) do delete(at(Placeid)) + insert(at(NewPlaceid)).
 		
-		% Keep track of nearby blocks
+		%Keep track of nearby blocks
 		forall bel(percept(atBlock(BlockID)))	do insert(atBlock(BlockID)).
 		forall bel(percept(not(atBlock(BlockID)))) do delete(atBlock(BlockID)).
 		
@@ -157,30 +170,25 @@ event module {
 		forall bel(percept(color(BlockID, ColorID)), not(block(BlockID, ColorID,_)),me(Me),in(Me,RoomID)) do insert(block(BlockID, ColorID,RoomID)) + allother.send(:block(BlockID, ColorID,RoomID)).
 		
 		% Keep track of block holding
-		forall bel(percept(holding(BlockID)), me(Me),block(BlockID,ColorID,_))	do insert(holding(Me, BlockID,ColorID)) + allother.send(:holding(BlockID,ColorID)).
+		forall bel(percept(holding(BlockID)), me(Me),block(BlockID,ColorID,RoomID), not(holding(Me, BlockID,ColorID)))	do insert(holding(Me, BlockID,ColorID)) + allother.send(:holding(BlockID,ColorID)) + allother.send(not(block(BlockID, ColorID, RoomID))).
 		forall bel(percept(not(holding(BlockID))), me(Me),holding(Me,BlockID, ColorID)) do delete(holding(Me, BlockID,ColorID)) + allother.send(:not(holding(BlockID,ColorID))).	
 							
-				
+							
 %		////////////////////////////////////
-%		Check old beliefs and memories with current percepts
+%		Check old beliefs with current percepts
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
 		
 		%block not found
 		forall bel(in(Me,RoomID), block(BlockID,ColorID,RoomID),not(percept(color(BlockID, ColorID))),not(holding(BlockID,ColorID)),me(Me)) do delete(block(BlockID,ColorID,RoomID)) + allother.send(not(block(BlockID,ColorID,RoomID))).
 
-%		////////////////////////////////////////
-%		make memories
-%		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-
-		%rooms that have been visited
+		%make a memory about new rooms that have been visited
 		forall bel(in(Me,RoomID), not(visited(RoomID)),me(Me)) do insert(visited(RoomID)).
 		
 %		////////////////////////////////////////////
 %		messages from other agents
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-%		Beliefs
-		
+%		---------Belief messages-------------------------------------		
 		%existing blocks
 		forall bel(received(Sender, block(BlockID, ColorID,RoomID)), not(block(BlockID,ColorID,RoomID))) do insert(block(BlockID, ColorID,RoomID)).
 		forall bel(received(Sender, not(block(BlockID, ColorID,RoomID))), block(BlockID,ColorID,RoomID), not(holding(BlockID,ColorID))) do delete(block(BlockID, ColorID,RoomID)).		
@@ -189,63 +197,55 @@ event module {
 		forall bel(received(Sender, holding(BlockID,ColorID)), not(holding(Sender,BlockID,ColorID))) do insert(holding(Sender,BlockID,ColorID)).
 		forall bel(received(Sender, not(holding(BlockID,ColorID))), holding(Sender,BlockID,ColorID)) do delete(holding(Sender,BlockID,ColorID)).
 		
-		%in and visited rooms		
+		%visited rooms		
 		forall bel(received(Sender, in(RoomID)), not(in(Sender,RoomID))) do {
 			if true then insert(in(Sender,RoomID)).
-			if bel(not(visited(RoomID))) then insert(visited(RoomID)). %make a memory
+			if bel(not(visited(RoomID))) then insert(visited(RoomID)). 										%make a memory
 		}		
 		forall bel(received(Sender, not(in(RoomID))), in(Sender,RoomID)) do delete(in(Sender,RoomID)).
 
-		%learn about deliveries		
+		%learn about deliveries
 		forall bel(received(Sender, delivered(ColorID))) do {
 			if bel(sequence(S),append(S,[ColorID],NewS)) then delete(sequence(S)) + insert(sequence(NewS)). %update sequence
-			if bel(holding(Sender,BlockID,ColorID)) then delete(holding(Sender,BlockID,ColorID)).			%delete holding
+			if bel(holding(Sender,BlockID,ColorID)) then delete(holding(Sender,BlockID,ColorID)).			%this messages also means not(holding)
 		}
-
 								
-%		Goals		
+%		-------Goal messages------------------------------------------		
 		%holding blocks
 		forall bel(received(Sender, imp(holding(NVal,BlockID,ColorID,SeqID)))) do adopt(holding(NVal,Sender,BlockID,ColorID,SeqID)).		
-		forall bel(received(Sender, imp( not( holding(NVal,BlockID,ColorID,SeqID)))),me(Me)) do drop(holding(NVal,Sender,BlockID,ColorID,SeqID)).		
-		
+		forall bel(received(Sender, imp( not( holding(NVal,BlockID,ColorID,SeqID)))),me(Me)) do drop(holding(NVal,Sender,BlockID,ColorID,SeqID)).				
 		
 		%exploring rooms
-		forall bel(received(Sender, imp(in(NVal,RoomID))))  do {
-			%store all goals
-			if true then adopt(in(NVal,Sender,RoomID)).
-			%fast method: only store goals that can be excecuted. (the goals that are not stored will later be dropped by the agent anyway.)
-			%if goal(in(PVal,Agent,RoomID)), bel(NVal<PVal) then adopt(in(NVal,Sender,RoomID)) + drop(in(PVal,Agent,RoomID)). %only adopt the lowest one!
-			%if not(goal(in(_,_,RoomID))) then adopt(in(NVal,Sender,RoomID)).			
-		}
+		forall bel(received(Sender, imp(in(NVal,RoomID))))  do adopt(in(NVal,Sender,RoomID)).
 		forall bel(received(Sender, imp( not (in(NVal,RoomID))))), goal(in(NVal,Sender,RoomID)) do drop(in(NVal,Sender,RoomID)).						
 		
+		%------remove received messages-------------------------------
 		forall bel(received(Sender, Message)) do delete(received(Sender, Message)).		
-
 
 %		//////////////////////////////////////////
 %		check goals for duplication of effort
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-		%holding goal		
-		forall bel(me(Me), state(State)), goal(holding(NVal,Me, BlockID,ColorID,SeqID)) do {
-			%drop when block doesn't exist
-			forall bel(not(block(BlockID,_,_))) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)). 
-			%drop when other agent can perform the same goal faster
+		%drop duplicate holding goals		
+		forall bel(me(Me), state(State)), goal(holding(NVal,Me, BlockID,ColorID,SeqID)) do {			 
+			%drop holding goal when other agent can perform the same goal faster, comparing the negitiation value
 			forall goal(holding(PVal,Other,SomeBlockID,ColorID,SeqID)), bel(Other \= Me, NVal>PVal) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)).
+			%drop when block doesn't exist (resilient feature, should not occur in normal operation)
+			forall bel(not(block(BlockID,_,_))) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + print([Me, 'block doesnt exist'])+ delete(state(State)) + insert(state(arrived)) .
 		}
 		
 		%drop duplicate room visit goals
 		forall bel(me(Me),state(State)), goal(in(NVal,Me,RoomID)) do {
+			%drop holding goal when other agent can perform the same goal faster, comparing the negitiation value
 			forall goal(in(PVal,Other,RoomID)), bel(Other \= Me, NVal>PVal) do drop(in(NVal,Me,RoomID)) + allother.send(!not(in(NVal,RoomID))) + delete(state(State)) + insert(state(arrived)).
 		}
 
 %		//////////////////////////////////////////
-%		List what work needs to be done
+%		List what work needs to be done & anticipate
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 		% remainingSequence(ColorList,NumberList) contains two lists with the elements of the sequence that should be gathered
-		% ColorList are the ColorIDs that should be gathered; NumberList are the corresponding SequenceIDs, so double colors can be distinguished   		
-		
+		% ColorList are the ColorIDs that should be gathered; NumberList are the corresponding SequenceIDs, so double colors can be distinguished   				
 		if goal(sequence(S)), bel(sequence(DoneList),remainingSequence(C,N), append(DoneList,Clist,S), Clist \= C, 
 		length(S,Last),length(Clist,Nlength), Start is Last-Nlength, End is Last-1, numlist(Start, End, Nlist)) 
 		then delete(remainingSequence(C,N)) + insert(remainingSequence(Clist,Nlist)).
@@ -253,27 +253,30 @@ event module {
 		%next color that must be delivered.		
 		if bel(remainingSequence([NextC|_],_), nextColorInSequence(C)) then delete(nextColorInSequence(C)) + insert(nextColorInSequence(NextC)).	
 		
-		%Remove elements that are currently a goal to be delivered from remainingSequence.
-		%The first element that matches SeqID and the corresponding Color is removed.
-		%speed-tweak: used listall instead of forall so only a single delete/insert is made.
-		listall L <- goal(holding(_,Agent,_,_,SeqID)), bel(not(me(Agent))) do {
-			if bel(remainingSequence(CList,NList), reducelistn(CList,NList,L,NewCList,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
-		}
+		%Remove elements that are currently a goal to be delivered from remainingSequence except for my own work (ugly implementation because listall).
+		if bel(me(Me)), goal(holding(_,Me,_,_,MySeqID)) then {
+			listall L <- goal(holding(_,Agent,_,_,SeqID)), bel(Agent \= Me, SeqID \= MySeqID) do {
+				if bel(remainingSequence(CList,NList), reducelistn(CList,NList,L,NewCList,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
+			}
+		}		
+		if bel(me(Me)), not(goal(holding(_,Me,_,_,_))) then {
+			listall L <- goal(holding(_,Agent,_,_,SeqID)) do {
+				if bel(remainingSequence(CList,NList), reducelistn(CList,NList,L,NewCList,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
+			}
+		}	
 		
 		%Remove elements that are currently held by an agent from remainingSequence.
-		%The first element that matches ColorID and the corresponding SequenceID is removed.
 		listall L <- bel(holding(Agent,_,ColorID),not(me(Agent))) do {
 			if bel(remainingSequence(CList,NList), reducelistc(CList,NList,L,NewCList,NewNList)) then delete(remainingSequence(CList,NList)) + insert(remainingSequence(NewCList,NewNList)).
 		}
-		
-		
+				
 %		//////////////////////////////////////////
 %		set/update goals
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 		forall bel(me(Me), state(State)), goal(holding(NVal,Me, BlockID,ColorID,SeqID)) do {
-			%drop when color is no longer needed
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)) + print([Me,'dropped goal',ColorID]).
+			%drop block when color is no longer needed (should not happen under normal circumstances)
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)) + print([Me,'dropped goal',ColorID]).% +   log(bb)+log(mb)+log(gb)+log(pb).
 		}
 		
 		% don't go to or be in dropzone if you don't hold the next required block
@@ -282,17 +285,8 @@ event module {
 			forall bel(at('DropZone')) do adopt(at('FrontDropZone'))+ delete(state(State)) + insert(state(arrived)).
 		}
 		
-		%for block priority strategy: drop exploration tasks when holding a block.
-		%forall goal(in(NVal,Me,RoomID)), bel(me(Me),holding(Me, BlockID,ColorID)) do drop(in(NVal,Me,RoomID)) + allother.send(!not(in(NVal,RoomID))).
-		
-		%quickest strategy: no other task is initiated untill the current task is finished.
-		%NOTE: the effectiveness of a strategy is very dependent on computational performance. e.g. if negotiations take too long on a slow pc then the result is not effective anymore		
-		
-		%current task priority: if not delivering a block or exploring then select a block to deliver
+		%If not delivering a block or exploring a room then select a block to deliver
 		if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_);in(_,Me,_))) then nextBlockSelection.
-		
-		%block delivery priority: if not delivering a block then select a block to deliver (also when exploring)
-		%if bel(me(Me),not(holding(_,_))), not(goal(holding(_,Me,_,_,_);at(_))) then nextBlockSelection.  		
 		
 		%when holding a block then go to the dropzone, via frontdropzone
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID),me(Me)) then {
@@ -302,7 +296,7 @@ event module {
 			if bel(at('FrontDropZone'),nextColorInSequence(ColorID)) then adopt(at('DropZone')).	
 		}	
 		
-		%if not holding a block, or going to a place then select a place to go
+		%if not holding a block, or going to a block/place then select a room to explore
 		if bel(me(Me),not(holding(_,_))), not(goal(at(_); atBlock(_); in(_,Me,_))) then nextRoomSelection.							
 
 
@@ -310,8 +304,7 @@ event module {
 %		End of Life management
 %  		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 		%not part of functional program, but required to get statistics and do quick batchruns.	
-
-					
+			
 		forall not(goal(sequence(S))) do {
 			%send signal to the analyist that the agent is finished.	
 			if true then bAnalyst.send(finished) + insert(sentLogs).
@@ -321,33 +314,18 @@ event module {
 			forall goal(in(NVal,Me,SomePlace)) do drop(in(NVal,Me,SomePlace)).
 			forall goal(holding(NVal,Agent,BlockID,ColorID,SeqID)) do drop(holding(NVal,Agent,BlockID,ColorID,SeqID)).
 		}
-		
-		
 	}		
 }
 
 module nextRoomSelection{
-	program [order=linearall]{		 
+	program [order=linear]{		 
 							
-		%make a list of all rooms that are already a goal to be visited to exclude them from being selected.
-		if bel(roomGoalList(RL)) then delete(roomGoalList(RL)) + insert(roomGoalList([])).	
-							
-		listall L <- goal(in(_,_,RoomID)) do {
-			if bel(roomGoalList(RL)) then delete(roomGoalList(RL)) + insert(roomGoalList(L)).
-		}				
 
-%!!!!!!!!!!!!!!!!!!!!		
-%NOTE: It would be nice if there was a variant on listall that returns [] instaid of fail when it cannot find matching goals (like findall does)
-%now I still have to make extra predicates for this list. Otherwise I could have intergrated it elegantly in the line below.		
-%!!!!!!!!!!!!!!!!!!!!		
+		listall L <- goal(in(_,_,RoomID)) do {			
+			if bel(findOptiRoom(L,Dist,OptiRoom),me(Me), random(R), NVal is R+Dist) then adopt(in(NVal,Me,OptiRoom)) + allother.send(!in(NVal,OptiRoom)).
+		}						
+		if not(goal(in(_,_,RoomID))), bel(findOptiRoom([],Dist,OptiRoom),me(Me), random(R), NVal is R+Dist) then adopt(in(NVal,Me,OptiRoom)) + allother.send(!in(NVal,OptiRoom)).
 
-		
-		%select the closest unexplored room and set a goal to visit the room.
-		if bel(me(Me),at(MyLoc),roomGoalList(RL),																							%get unavailable rooms
-			findall((D,RoomID) , (room(RoomID),not(visited(RoomID)),not(memberchk(RoomID,RL)),RoomID\='DropZone',findPath([MyLoc],RoomID,D)) , L),	%find all available rooms and their distance
-			sort(L,RoomList), [(Dist,OptiRoom)|_] = RoomList, random(R), NVal is R+Dist) 									%sort rooms for the closest distance, this distance (+ random) is the negotiation value
-		then adopt(in(NVal,Me,OptiRoom)) + allother.send(!in(NVal,OptiRoom)).												%adopt and communicate goal to explore the closest room
-		
 		%go to frontdropzone if no room was selected			
 		if not(goal(in(NVal,Me,OptiRoom))), bel(me(Me),not(at('FrontDropZone'))) then adopt(at('FrontDropZone')).				
 		
@@ -355,22 +333,20 @@ module nextRoomSelection{
 }
 
 module nextBlockSelection{	
-	program [order=linearall]{		
+	program [order=linear]{		
 
-		%blockGoalList is a list of all blocks that will be used in the future
-		if bel(blockGoalList(BL)) then delete(blockGoalList(BL)) + insert(blockGoalList([])).							
-		
-		% Add every block that is a goal to the blockGoalList
+		%if others have a goal to hold a block, don't pick that block
 		listall L <- goal(holding(_,_,BlockID,_,_)) do {
-			if bel(blockGoalList(BL)) then delete(blockGoalList(BL)) + insert(blockGoalList(L)).							
-		}
- 		
-		%select the closest available block of the required color and set a goal to get to and hold the block
-		if bel(me(Me), blockGoalList(BlockGoalList), remainingSequence([ColorID|_],[SeqID|_]),state(State),																%get the required block color and unavailable blocks
-			findall((D,SomeBlockID), (block(SomeBlockID,ColorID, SomeRoomID),not(memberchk(SomeBlockID, BlockGoalList)), deliveryDistance(SomeRoomID,D)),L),			%find all available blocks and their distance 
-			sort(L,BlockList), [(Dist,OptiBlockID)|_] = BlockList,	block(OptiBlockID, ColorID, RoomID), random(R), NVal is Dist + R) 							%sort blocks for the closest distance, this distance (+ random) is the negotiation value
+			if bel(remainingSequence([ColorID|_],[SeqID|_]), findOptiBlock(ColorID, L, Dist, OptiBlockID), me(Me),state(State), block(OptiBlockID, ColorID, RoomID), random(R), NVal is Dist + R) 
 			then adopt(at(RoomID),atBlock(OptiBlockID), holding(NVal, Me,OptiBlockID,ColorID,SeqID)) + allother.send(!holding(NVal, OptiBlockID,ColorID,SeqID))	%adopt and communicate goal to get the closest block
-			+ delete(state(State)) + insert(state(arrived)).
+			+ delete(state(State)) + insert(state(arrived)).			
+		}
+		
+		%pick any block
+		if not(goal(holding(_,_,BlockID,_,_))), bel(remainingSequence([ColorID|_],[SeqID|_]), findOptiBlock(ColorID, [], Dist, OptiBlockID), me(Me),state(State), block(OptiBlockID, ColorID, RoomID), random(R), NVal is Dist + R)
+		then adopt(at(RoomID),atBlock(OptiBlockID), holding(NVal, Me,OptiBlockID,ColorID,SeqID)) + allother.send(!holding(NVal, OptiBlockID,ColorID,SeqID))%adopt and communicate goal to get the closest block
+		+ delete(state(State)) + insert(state(arrived)).
+
 	}
 }
 	
