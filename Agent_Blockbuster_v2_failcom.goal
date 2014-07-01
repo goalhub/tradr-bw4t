@@ -61,6 +61,22 @@ init module {
 		%The next color that is required in the dropzone
 		nextColorInSequence([]).
 		
+		%types of possible messages and their syntax 
+		messageType(block, block(X,Y,Z)).
+		messageType(nblock, not(block(X,Y,Z))).
+		messageType(holding, holding(X,Y)).
+		messageType(nholding, not(holding(X,Y))).
+		messageType(in,in(X)).
+		messageType(nin, not(in(X))).
+		messageType(delivered,delivered(X)).				
+		messageType(impholding, imp(holding(X,Y,Z,Q))).
+		messageType(nimpholding, imp( not( holding(X,Y,Z,Q)))).
+		messageType(impin, imp(in(NVal,RoomID))).
+		messageType(nimpin, imp(not(in(NVal,RoomID)))).
+		messageType(normal, normal).
+		
+		
+
 	}	
 	goals{		
 		%goal to notify analyst about being finished
@@ -78,7 +94,7 @@ init module {
 		forall bel(percept(sequence(T))) do adopt(sequence(T)) + bAnalyst.send(sequence(T)).
 			
 		% insert current location
-		forall bel(percept(at(X))) do insert(at(X)).
+		forall bel(percept(at(X))) do insert(at(X)).		
 
 	}
 	actionspec {	
@@ -121,7 +137,7 @@ main module [exit=nogoals]{
 		% drop blocks				
 		if bel(holding(BlockID,ColorID), block(BlockID, ColorID, RoomID)) then{
 			% drop the block if its color is not needed (function to improve resilience, should not happen during normal use, this could indicate that the agent is cycling too slow).			
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)),me(Me),in(Me,RoomID)) then putDown + log(bb)+log(gb)+log(mb)+log(pb)+ allother.send(:not(holding(BlockID,ColorID))) + print([Me, 'dropped a block']) + bAnalyst.send(dropped).		
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL)),me(Me),in(Me,RoomID)) then putDown + allother.send(:not(holding(BlockID,ColorID))) + bAnalyst.send(dropped). %+ log(bb)+log(gb)+log(mb)+log(pb)print([Me, 'dropped a block'])		
 			
 			% drop the block in the dropzone if the color is needed and get out.
 			% Also add the color to the sequence and tell other agents about the delivery
@@ -138,9 +154,9 @@ main module [exit=nogoals]{
 		
 		%go to places that are a goal
 		%at(PlaceID) is used for location goals that don't have to be shared with others.
-		if a-goal(at(PlaceID)) then goTo(PlaceID).			
+		if a-goal(at(PlaceID)) then goTo(PlaceID) + bAnalyst.send(goto(PlaceID)).			
 		%in(NVal,Agent,RoomID) is used for location goals that are shared with others, so others can anticipate and negotiate. 	
-		if bel(me(Me)), goal(in(_,Me,RoomID)) then goTo(RoomID).
+		if bel(me(Me)), goal(in(_,Me,RoomID)) then goTo(RoomID) + bAnalyst.send(goTo(RoomID)).
 	}
 }
 
@@ -172,7 +188,13 @@ event module {
 		% Keep track of block holding
 		forall bel(percept(holding(BlockID)), me(Me),block(BlockID,ColorID,RoomID), not(holding(Me, BlockID,ColorID)))	do insert(holding(Me, BlockID,ColorID)) + allother.send(:holding(BlockID,ColorID)) + allother.send(not(block(BlockID, ColorID, RoomID))).
 		forall bel(percept(not(holding(BlockID))), me(Me),holding(Me,BlockID, ColorID)) do delete(holding(Me, BlockID,ColorID)) + allother.send(:not(holding(BlockID,ColorID))).	
-							
+
+		% (only to avoid lucky timing in dropzone) Keep track of occupied rooms
+		forall bel(percept(occupied(RoomID)))	do insert(occupied(RoomID)).
+		forall bel(percept(not(occupied(RoomID)))) do delete(occupied(RoomID)).
+					
+		% (only for verification) Keep track of current sequenceIndex.		
+		forall bel(percept(sequenceIndex(NewInteger))) do bAnalyst.send(sequenceIndex(NewInteger)).							
 							
 %		////////////////////////////////////
 %		Check old beliefs with current percepts
@@ -187,6 +209,17 @@ event module {
 %		////////////////////////////////////////////
 %		messages from other agents
 %		\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+%		--------- message failure-----------------------------
+
+		%learn about possible failure rates
+		forall bel(received(Sender, successRate(Type, SRate)), me(Me)) do insert(successRate(Type, SRate)). %+ print([Me, successRate(Type, SRate)]).
+		
+		%apply succes or failure
+		forall bel(successRate(Type, SRate), messageType(Type,Message), received(Sender, Message), random(R)) do {
+			if bel(R>=SRate) then delete(received(Sender, Message)) + bAnalyst.send(failed(Type)).% + print(['message failed: ',Message, R]).
+			if bel(R<SRate) then bAnalyst.send(success(Type)).% +print(['message success: ',Message, R]).
+		} 
 
 %		---------Belief messages-------------------------------------		
 		%existing blocks
@@ -231,7 +264,7 @@ event module {
 			%drop holding goal when other agent can perform the same goal faster, comparing the negitiation value
 			forall goal(holding(PVal,Other,SomeBlockID,ColorID,SeqID)), bel(Other \= Me, NVal>PVal) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)).
 			%drop when block doesn't exist (resilient feature, should not occur in normal operation)
-			forall bel(not(block(BlockID,_,_))) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + print([Me, 'block doesnt exist'])+ delete(state(State)) + insert(state(arrived)) .
+			forall bel(not(block(BlockID,_,_))) do drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)) .% + print([Me, 'block doesnt exist'])
 		}
 		
 		%drop duplicate room visit goals
@@ -276,7 +309,7 @@ event module {
 
 		forall bel(me(Me), state(State)), goal(holding(NVal,Me, BlockID,ColorID,SeqID)) do {
 			%drop block when color is no longer needed (should not happen under normal circumstances)
-			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)) + print([Me,'dropped goal',ColorID]).% +   log(bb)+log(mb)+log(gb)+log(pb).
+			if bel(remainingSequence(TDL,_),not( memberchk(ColorID, TDL))) then drop(holding(NVal, Me,BlockID,ColorID,SeqID)) + allother.send(!not(holding(NVal,BlockID,ColorID,SeqID))) + delete(state(State)) + insert(state(arrived)).% + print([Me,'dropped goal',ColorID]).% +   log(bb)+log(mb)+log(gb)+log(pb).
 		}
 		
 		% don't go to or be in dropzone if you don't hold the next required block
@@ -293,7 +326,7 @@ event module {
 			%always go to frontdropzone with a block
 			if not(goal(at('FrontDropZone'))), bel(at(PlaceID), PlaceID \= 'FrontDropZone', PlaceID \= 'DropZone') then adopt(at('FrontDropZone')).
 			%go to dropzone if holding the next required color
-			if bel(at('FrontDropZone'),nextColorInSequence(ColorID)) then adopt(at('DropZone')).	
+			if bel(at('FrontDropZone'),nextColorInSequence(ColorID), not(occupied('DropZone'))) then adopt(at('DropZone')).	
 		}	
 		
 		%if not holding a block, or going to a block/place then select a room to explore

@@ -6,8 +6,10 @@ environment{
 
 agentfiles{
 % insert (list of) agent file references below.
-	%"Agent_Blockbuster_msgloss.goal" [name = bBot] .
-	"Agent_Blockbuster_v2.goal" [name = bBot] .
+	%"Agent_Blockbuster_msgloss.goal" [name = bBot].
+	%"Agent_Blockbuster_v2.goal" [name = bBot].
+	"Agent_Blockbuster_v2_failcom.goal" [name = bBot].
+	
 	% Analyst file used for launching agent that analyses (counts) message reports from other agents.
 	"Analyst_Blockbuster_v2.goal" [name = bAnalyst].
 	%"humanbot.goal" [name = robot].
@@ -17,8 +19,9 @@ agentfiles{
 launchpolicy{
 	% insert appropriate launch rules for your environment and agents below.
 	%when [type=human, max=1]@env do launch * : robot .
-	when entity@env do launch bBot : bBot .
 	launch bAnalyst : bAnalyst.
+	when entity@env do launch bBot : bBot .
+		
 	
 	
 }

@@ -10,57 +10,84 @@ init module {
 	beliefs {
 
 		
-		timeoutTime(230).
+		timeoutTime(45).
 		overtime(0).
+		cycle(0).
+		messages(0).
+		gotos(0).
 		
-		failedMessageCount(block,0).
-		failedMessageCount(delivered,0).
-		failedMessageCount(visited,0).
-		goodMessageCount(block,0).
-		goodMessageCount(delivered,0).
-		goodMessageCount(visited,0).	
+		sequenceIndex(0).
+		totalInCount(0).
+		totalVisited(0).
+		%possible messages that can be sabotaged
+		mType(normal, 1).		
+		mType(block,12).
+		mType(nblock,2).
+		mType(holding,3).
+		mType(nholding,4).
+		mType(in,5).
+		mType(nin,6).
+		mType(delivered,7).				
+		mType(impholding,8).
+		mType(nimpholding,9).
+		mType(impin,10).
+		mType(nimpin,11).
+		
 			
 	}
 	% Agent needs to hold a goal to use BatchRunner.
 	goals{
 		makelogs.
 	}
-	program {
-		% This is absolute time measuring the state time. 
-		if bel( currentTime(H, M, S) ) then insert( startTime(H, M, S) ).
-		
-		%forall bel(percept(sequence(T))) do insert(sequence(T)).
-		
-		% initiate random communication fails. 
-		
-		
+	program {		
     }
 }
 main module [exit=nogoals]{
-program{}
+program{
+	%log performance
+	if bel(cycle(N), Next is N+1) then delete(cycle(N)) + insert(cycle(Next)).
+}
 }
 
 
 event module {
 	program {
-				
-		%set random fail parameters for agents		
-		if bel(not(comFailBlock(_)), random(R)) then insert(comFailBlock(R)) + allother.sendonce(:comFailBlock(R)).
-		if bel(not(comFailDelivered(_)), random(R)) then insert(comFailDelivered(R)) + allother.sendonce(:comFailDelivered(R)).
-		if bel(not(comFailVisited(_)), random(R)) then insert(comFailVisited(R)) + allother.sendonce(:comFailVisited(R)).
 		
+		%second init: agents are not in the environment during first init
+		if bel(not(startTime(_,_,_)), agent(X), not(me(X))) then {
+			%set start time
+			if bel(currentTime(H, M, S)) then insert( startTime(H, M, S) ).
+			%set succesRates for agent messages for one random type
+			if bel(random_between(1, 12, N),mType(T,N), random(R)) then insert(successRate(T, R)) + insert(rate(T,0,0))  + print([successRate(T, R)]).
+			%set normal successRates			
+			%if bel(mType(T,1), random(R)) then insert(successRate(T, R)) + insert(rate(T,0,0))  + print([successRate(T, R)]).
+		}	
+		
+		%send information to every agent (launch is not at same time!)								
+		forall bel(agent(X), not(me(X)), not(informed(X)),successRate(T, R)) do X.send(successRate(T, R)) + insert(informed(X)) + insert(inCount(X,0)).
 		%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PROCESS INCOMING MESSAGES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 		% Message about the environmental condition. We need to log it so that we can distinghish data.
 		
+		forall bel(received(Sender,_)) do {
+			if bel(messages(N), Next is N+1) then delete(messages(N)) + insert(messages(Next)).
+		}
+		forall bel( received(Sender, failed(Type))) do {
+			if bel(rate(Type,F,S), Next is F+1) then delete(rate(Type,F,S)) + insert(rate(Type,Next,S)).
+		}
+		forall bel( received(Sender, success(Type))) do {
+		 	if bel(rate(Type,F,S), Next is S+1) then delete(rate(Type,F,S)) + insert(rate(Type,F,Next)).
+		}
 		
+		forall bel(received(Sender, goTo(_))) do {
+			if bel(gotos(N), Next is N+1) then delete(gotos(N)) + insert(gotos(Next)).
+		}
 
-		forall bel( received(Sender, failMessage(block)), failedMessageCount(block,I), Next is I+1) do delete(failedMessageCount(block,I)) + insert(failedMessageCount(block, Next) ).
-		forall bel( received(Sender, failMessage(delivered)), failedMessageCount(delivered,I), Next is I+1) do delete(failedMessageCount(delivered,I)) + insert(failedMessageCount(delivered, Next) ).
-		forall bel( received(Sender, failMessage(visited)), failedMessageCount(visited,I), Next is I+1) do delete(failedMessageCount(visited,I)) + insert(failedMessageCount(visited, Next) ).
+		forall bel( received(Sender,sequenceIndex(NewInteger)), sequenceIndex(I)) do delete(sequenceIndex(I)) + insert(sequenceIndex(NewInteger)).
 		
-		forall bel( received(Sender, goodMessage(block)), goodMessageCount(block,I), Next is I+1) do delete(goodMessageCount(block,I)) + insert(goodMessageCount(block, Next) ).
-		forall bel( received(Sender, goodMessage(delivered)), goodMessageCount(delivered,I), Next is I+1) do delete(goodMessageCount(delivered,I)) + insert(goodMessageCount(delivered, Next) ).
-		forall bel( received(Sender, goodMessage(visited)), goodMessageCount(visited,I), Next is I+1) do delete(goodMessageCount(visited,I)) + insert(goodMessageCount(visited, Next) ).
+		forall bel( received(Sender,in(RoomID))) do {	
+			if bel(inCount(Sender,N), totalInCount(T), Next is N+1, Total is T+1) then delete(inCount(Sender,N)) + delete(totalInCount(T)) + insert(inCount(Sender,Next)) + insert(totalInCount(Total)).
+			if bel(not(visited(RoomID)), totalVisited(N), Next is N+1) then delete(totalVisited(N)) + insert(visited(RoomID)) + insert(totalVisited(Next)).
+		}
 			
 		forall bel( received(Sender, sequence(T)),not(sequence(T)), length(T,L)) do insert(sequence(T)) + insert(seqLength(L)).
 		forall bel( received(Sender, toolong)) do insert(toolong).
@@ -71,9 +98,10 @@ event module {
 		if bel(relativeTime(S),timeoutTime(T), S > T) then delete(overtime(0)) + insert(overtime(1)).
 		
 				
-		if bel( received(Sender, finished);overtime(1)), goal(makelogs) then {
+		if bel( received(Sender, finished);overtime(1)), goal(makelogs) then {			
+			if bel(overtime(1)) then print(['overtime']).
 			if bel( relativeTime(S) ) then insert( timeToComplete(S) ).
-			if true then log(bb) + insert( makelogs ).
+			if true then insert(finished) + log(bb) + insert( makelogs ).
 		}
 	
 		% CLEAN UP MAIL BOX
