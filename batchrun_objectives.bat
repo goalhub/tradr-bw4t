@@ -3,13 +3,13 @@
 @echo on
 
 ::set environment (different per PC)
-cd C:\Users\Chris Rozemuller\GOAL
+cd C:\Users\koen\GOAL
 ::set PATH=swifiles/libs;c:\Program Files\java\jre7\bin;c:\Program Files\java\jre6\bin;%PATH%
 set PATH=swifiles/libs;c:\Program Files\java\jre7\bin
 set SWI_HOME_DIR=swifiles
 
 :: call mas2g files
-java -cp goal.jar -Djava.library.path=swifiles/libs goal.tools.Run "%~dp0Blockbuster_v2.mas2g" --repeats 1000 --timeout 50
+java -cp goal.jar -Djava.library.path=swifiles/libs goal.tools.Run "%~dp0Blockbuster_v2.mas2g" --repeats 2 --timeout 100
 
 ::java -cp goal.jar -Djava.library.path=swifiles/libs goal.tools.Run "%~dp0batch\Blockbuster_v2_10.mas2g" --repeats 2 --timeout 60
 ::java -cp goal.jar -Djava.library.path=swifiles/libs goal.tools.Run "%~dp0batch\Blockbuster_v2_1.mas2g" --repeats 2 --timeout 120
@@ -28,6 +28,6 @@ java -cp goal.jar -Djava.library.path=swifiles/libs goal.tools.Run "%~dp0Blockbu
 
 
 ::recursive self calling
-start cmd /c "%~dp0batchrun_objectives.bat"
+%~dp0batchrun_objectives.bat
 ::pause
-exit
+::exit
